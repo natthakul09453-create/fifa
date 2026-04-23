@@ -1,0 +1,1219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PostureGuard — Office Wellness</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0b0f0e;
+      --surface: #131917;
+      --surface2:#1a2120;
+      --border:  #243130;
+      --accent:  #00e5a0;
+      --warn:    #ff5f5f;
+      --text:    #e8f0ee;
+      --muted:   #6b8882;
+      --ff-h: 'Syne', sans-serif;
+      --ff-b: 'DM Sans', sans-serif;
+    }
+
+    body {
+      font-family: var(--ff-b);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 40px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(11,15,14,0.9);
+      backdrop-filter: blur(10px);
+      position: sticky; top: 0; z-index: 100;
+    }
+    .logo {
+      font-family: var(--ff-h); font-weight: 800; font-size: 1.2rem;
+      display: flex; align-items: center; gap: 9px;
+    }
+    .logo-dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--accent); box-shadow: 0 0 10px var(--accent);
+      animation: blink 2.5s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .badge {
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); border: 1px solid var(--border);
+      padding: 3px 10px; border-radius: 20px;
+    }
+
+    .debug-bar {
+      background: #141008;
+      border-bottom: 2px dashed #3d2a00;
+      padding: 8px 40px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .debug-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #c08030;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .debug-sep { color: #3d2a00; font-size: 1rem; }
+    .debug-btn {
+      padding: 5px 14px;
+      font-family: var(--ff-b);
+      font-size: 0.72rem;
+      font-weight: 500;
+      border-radius: 6px;
+      border: 1px solid;
+      cursor: pointer;
+      transition: all 0.15s;
+      letter-spacing: 0.02em;
+    }
+    .debug-btn.trigger-posture {
+      background: rgba(255,95,95,0.08);
+      border-color: rgba(255,95,95,0.4);
+      color: #ff8c8c;
+    }
+    .debug-btn.trigger-posture:hover {
+      background: rgba(255,95,95,0.18);
+      border-color: var(--warn);
+    }
+    .debug-btn.trigger-break {
+      background: rgba(100,180,255,0.08);
+      border-color: rgba(100,180,255,0.4);
+      color: #90caff;
+    }
+    .debug-btn.trigger-break:hover {
+      background: rgba(100,180,255,0.18);
+      border-color: #64b4ff;
+    }
+    .debug-note {
+      font-size: 0.62rem;
+      color: #5a4010;
+      margin-left: auto;
+    }
+
+    .page {
+      display: grid;
+      grid-template-columns: auto 340px;
+      gap: 32px;
+      padding: 36px 40px;
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+      flex: 1;
+      align-items: start;
+    }
+
+    .left { display: flex; flex-direction: column; gap: 16px; }
+    .label {
+      font-size: 0.7rem; text-transform: uppercase;
+      letter-spacing: 0.12em; color: var(--muted);
+    }
+
+    .video-container {
+      position: relative;
+      display: inline-block;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    .corner { position: absolute; width: 20px; height: 20px; z-index: 5; pointer-events: none; }
+    .corner.tl { top:10px; left:10px;  border-top:2px solid var(--accent); border-left:2px solid var(--accent);  border-radius:4px 0 0 0; }
+    .corner.tr { top:10px; right:10px; border-top:2px solid var(--accent); border-right:2px solid var(--accent); border-radius:0 4px 0 0; }
+    .corner.bl { bottom:10px; left:10px;  border-bottom:2px solid var(--accent); border-left:2px solid var(--accent);  border-radius:0 0 0 4px; }
+    .corner.br { bottom:10px; right:10px; border-bottom:2px solid var(--accent); border-right:2px solid var(--accent); border-radius:0 0 4px 0; }
+
+    #video  { display: block; width: 640px; height: 480px; }
+    #canvas { position: absolute; top: 0; left: 0; width: 640px; height: 480px; }
+
+    #idleOverlay {
+      position: absolute; inset: 0;
+      background: var(--surface);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 14px; color: var(--muted); z-index: 3;
+    }
+    #idleOverlay svg { opacity: 0.2; }
+    #idleOverlay p { font-size: 0.85rem; }
+
+    #badCountdown {
+      position: absolute; top: 14px; right: 14px;
+      background: rgba(255,95,95,0.12); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,95,95,0.35); border-radius: 10px;
+      padding: 8px 12px; z-index: 10;
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      opacity: 0; transition: opacity 0.3s; pointer-events: none;
+    }
+    #badCountdown.show { opacity: 1; }
+    .cd-label { color: #ff8c8c; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em; }
+    .cd-time  { color: #ffaaaa; font-family: var(--ff-h); font-weight: 800; font-size: 1.1rem; }
+
+    /* Keypoint legend overlay */
+    #keypointLegend {
+      position: absolute; bottom: 50px; left: 10px;
+      background: rgba(11,15,14,0.82); backdrop-filter: blur(6px);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 10px; z-index: 10;
+      display: none; flex-direction: column; gap: 3px;
+    }
+    #keypointLegend.show { display: flex; }
+    .legend-row { display: flex; align-items: center; gap: 6px; font-size: 0.6rem; color: var(--muted); }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    /* Posture detail overlay */
+    #postureDetail {
+      position: absolute; top: 14px; left: 14px;
+      background: rgba(11,15,14,0.82); backdrop-filter: blur(6px);
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; z-index: 10;
+      display: none; flex-direction: column; gap: 4px;
+      opacity: 0; transition: opacity 0.3s;
+    }
+    #postureDetail.show { display: flex; opacity: 1; }
+    .pd-row { display: flex; align-items: center; gap: 6px; font-size: 0.64rem; }
+    .pd-label { color: var(--muted); min-width: 90px; }
+    .pd-val { font-family: var(--ff-h); font-weight: 700; font-size: 0.7rem; }
+    .pd-val.good { color: var(--accent); }
+    .pd-val.bad  { color: var(--warn); }
+    .pd-val.warn { color: #ffb347; }
+
+    #camPill {
+      position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+      background: rgba(11,15,14,0.88); backdrop-filter: blur(8px);
+      border: 1px solid var(--border); border-radius: 40px;
+      padding: 6px 14px; font-size: 0.74rem; font-weight: 500;
+      display: flex; align-items: center; gap: 7px; z-index: 10;
+      white-space: nowrap; opacity: 0; transition: opacity 0.3s;
+    }
+    #camPill.show { opacity: 1; }
+    .pill-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: blink 1.5s ease-in-out infinite; }
+    .pill-dot.bad { background: var(--warn); }
+
+    #postureStatus {
+      font-size: 1rem; font-weight: 600; font-family: var(--ff-h); min-height: 1.4em;
+    }
+    #postureStatus.good { color: var(--accent); }
+    #postureStatus.bad  { color: var(--warn); }
+    #angleDisplay { font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
+
+    #alertBanner {
+      display: none; align-items: center; gap: 10px;
+      padding: 10px 14px; border-radius: 10px;
+      background: rgba(255,95,95,0.07);
+      border: 1px solid rgba(255,95,95,0.22);
+      font-size: 0.8rem; color: #ff8c8c;
+    }
+    #alertBanner.show { display: flex; }
+
+    #startBtn {
+      display: flex; align-items: center; gap: 9px;
+      width: fit-content; padding: 12px 24px;
+      background: var(--accent); color: #0b0f0e;
+      font-family: var(--ff-h); font-weight: 700; font-size: 0.9rem;
+      border: none; border-radius: 10px; cursor: pointer; transition: all 0.2s;
+    }
+    #startBtn:hover { background: #00ffb3; box-shadow: 0 0 16px rgba(0,229,160,0.3); transform: translateY(-1px); }
+    #startBtn.stop  { background: transparent; border: 1px solid var(--warn); color: var(--warn); }
+    #startBtn.stop:hover { background: rgba(255,95,95,0.07); }
+
+    .sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 18px;
+    }
+    .card-title {
+      font-family: var(--ff-h); font-weight: 700; font-size: 0.8rem;
+      margin-bottom: 14px; color: var(--text);
+    }
+
+    .break-ring-wrap { display: flex; align-items: center; gap: 14px; }
+    .break-arc-bg   { fill: none; stroke: var(--border); stroke-width: 5; }
+    .break-arc-fill {
+      fill: none; stroke: #64b4ff; stroke-width: 5; stroke-linecap: round;
+      stroke-dasharray: 188; stroke-dashoffset: 0;
+      transform: rotate(-90deg); transform-origin: 50% 50%;
+      transition: stroke-dashoffset 1s linear, stroke 0.3s;
+    }
+    .break-arc-fill.near { stroke: #ffb347; }
+    .break-arc-num { font-family: var(--ff-h); font-weight: 800; font-size: 1rem; fill: var(--text); }
+    .break-arc-lbl { font-size: 0.52rem; fill: var(--muted); }
+    .break-info { flex: 1; }
+    .break-next-label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
+    .break-next-time  { font-family: var(--ff-h); font-size: 1.1rem; font-weight: 700; color: #64b4ff; }
+    .break-next-time.near { color: #ffb347; }
+
+    .ring-wrap { display: flex; align-items: center; gap: 16px; }
+    .ring-bg   { fill: none; stroke: var(--border); stroke-width: 6; }
+    .ring-arc  {
+      fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round;
+      stroke-dasharray: 251; stroke-dashoffset: 251;
+      transform: rotate(-90deg); transform-origin: 50% 50%;
+      transition: stroke-dashoffset 0.7s ease, stroke 0.3s;
+    }
+    .ring-arc.bad { stroke: var(--warn); }
+    .ring-num { font-family: var(--ff-h); font-weight: 800; font-size: 1.4rem; fill: var(--text); }
+    .ring-lbl { font-size: 0.56rem; fill: var(--muted); }
+    .ring-info { flex:1; }
+    .ring-status { font-family: var(--ff-h); font-size: 1.1rem; font-weight: 700; color: var(--muted); margin-bottom: 3px; }
+    .ring-status.good { color: var(--accent); }
+    .ring-status.bad  { color: var(--warn); }
+    .ring-desc { font-size: 0.76rem; color: var(--muted); line-height: 1.55; }
+
+    /* Multi-angle meters */
+    .meter-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .meter-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .meter-name { font-size: 0.76rem; color: var(--muted); flex: 1; }
+    .meter-track { width: 70px; height: 4px; background: var(--border); border-radius: 4px; overflow: hidden; flex-shrink: 0; }
+    .meter-fill  { height: 100%; border-radius: 4px; background: var(--accent); width: 0%; transition: width 0.45s ease, background 0.3s; }
+    .meter-fill.bad { background: var(--warn); }
+    .meter-fill.warn { background: #ffb347; }
+    .meter-val { font-family: var(--ff-h); font-weight: 700; font-size: 0.9rem; min-width: 50px; text-align: right; }
+
+    .timer-big  { font-family: var(--ff-h); font-size: 1.9rem; font-weight: 800; letter-spacing: -0.03em; }
+    .timer-sub  { font-size: 0.7rem; color: var(--muted); margin-top: 3px; }
+
+    .tip { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--border); }
+    .tip:last-child { border-bottom: none; padding-bottom: 0; }
+    .tip-icon { width: 26px; height: 26px; background: var(--surface2); border-radius: 7px; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; flex-shrink: 0; }
+    .tip-text { font-size: 0.75rem; color: var(--muted); line-height: 1.6; }
+    .tip-text strong { color: var(--text); font-weight: 500; }
+
+    #postureAlarm {
+      display: none;
+      position: fixed; inset: 0; z-index: 9000;
+      align-items: center; justify-content: center; flex-direction: column;
+      background: rgba(180,0,0,0.18);
+      backdrop-filter: blur(2px);
+      animation: alarmFlash 0.6s ease-in-out infinite alternate;
+    }
+    #postureAlarm.show { display: flex; }
+    @keyframes alarmFlash {
+      from { background: rgba(180,0,0,0.10); }
+      to   { background: rgba(220,0,0,0.32); }
+    }
+    .alarm-box {
+      background: #1a0505; border: 3px solid var(--warn); border-radius: 24px;
+      padding: 48px 56px; text-align: center; max-width: 560px; width: 90%;
+      box-shadow: 0 0 80px rgba(255,50,50,0.5), 0 0 200px rgba(255,50,50,0.2);
+      animation: alarmPop 0.4s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    @keyframes alarmPop { from { transform:scale(0.7); opacity:0; } to { transform:scale(1); opacity:1; } }
+    .alarm-icon { font-size:5rem; line-height:1; margin-bottom:16px; animation:alarmBounce 0.5s ease-in-out infinite alternate; display:block; }
+    @keyframes alarmBounce { from { transform:scale(1) rotate(-4deg); } to { transform:scale(1.15) rotate(4deg); } }
+    .alarm-title { font-family:var(--ff-h); font-size:2.2rem; font-weight:800; color:var(--warn); letter-spacing:-0.02em; margin-bottom:10px; text-shadow:0 0 24px rgba(255,95,95,0.6); }
+    .alarm-sub   { font-size:1rem; color:#ffaaaa; line-height:1.6; margin-bottom:28px; }
+    .alarm-counter { display:inline-flex; align-items:center; justify-content:center; width:64px; height:64px; border-radius:50%; border:3px solid var(--warn); font-family:var(--ff-h); font-size:1.8rem; font-weight:800; color:var(--warn); margin-bottom:28px; box-shadow:0 0 20px rgba(255,95,95,0.4); }
+    .alarm-dismiss { padding:12px 32px; background:var(--warn); color:#fff; font-family:var(--ff-h); font-weight:700; font-size:0.95rem; border:none; border-radius:10px; cursor:pointer; transition:all 0.2s; }
+    .alarm-dismiss:hover { background:#ff8080; transform:scale(1.04); }
+    .video-container.alarming { border-color:var(--warn)!important; animation:borderPulse 0.6s ease-in-out infinite alternate; }
+    @keyframes borderPulse { from{box-shadow:0 0 0 3px rgba(255,95,95,0.3);} to{box-shadow:0 0 0 6px rgba(255,95,95,0.6);} }
+
+    #breakModal {
+      display: none;
+      position: fixed; inset: 0; z-index: 9100;
+      align-items: center; justify-content: center;
+      background: rgba(0,8,20,0.80);
+      backdrop-filter: blur(10px);
+    }
+    #breakModal.show { display: flex; }
+
+    .break-box {
+      background: #060e18; border: 2px solid #1a3a60; border-radius: 28px;
+      max-width: 640px; width: 92%; max-height: 90vh; overflow-y: auto;
+      box-shadow: 0 0 80px rgba(50,130,255,0.25), 0 0 200px rgba(50,130,255,0.1);
+      animation: breakPop 0.45s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    @keyframes breakPop { from{transform:scale(0.8) translateY(20px);opacity:0;} to{transform:scale(1) translateY(0);opacity:1;} }
+
+    .break-header { padding:36px 40px 24px; border-bottom:1px solid #0e2540; text-align:center; }
+    .break-moon   { font-size:3.5rem; display:block; margin-bottom:12px; animation:floatAnim 3s ease-in-out infinite; }
+    @keyframes floatAnim { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-8px);} }
+    .break-title    { font-family:var(--ff-h); font-size:1.8rem; font-weight:800; color:#90caff; margin-bottom:8px; letter-spacing:-0.02em; }
+    .break-subtitle { font-size:0.85rem; color:#4a7a9c; line-height:1.6; }
+
+    .break-question { padding:24px 40px; border-bottom:1px solid #0e2540; }
+    .break-q-text { font-family:var(--ff-h); font-size:1rem; font-weight:700; color:var(--text); margin-bottom:16px; text-align:center; }
+    .break-btns { display:flex; gap:12px; justify-content:center; }
+    .break-yes,.break-no { padding:11px 28px; border-radius:10px; font-family:var(--ff-h); font-weight:700; font-size:0.85rem; cursor:pointer; transition:all 0.2s; border:none; }
+    .break-yes { background:#64b4ff; color:#060e18; }
+    .break-yes:hover { background:#90caff; transform:translateY(-1px); }
+    .break-no  { background:transparent; border:1px solid #1a3a60; color:#5a82a8; }
+    .break-no:hover  { border-color:#64b4ff; color:#64b4ff; }
+
+    .stretches-section { padding:28px 40px; }
+    .stretches-title { font-family:var(--ff-h); font-weight:700; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.12em; color:#3a6288; margin-bottom:18px; }
+    .stretch-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .stretch-card { background:#0a1a2a; border:1px solid #1a3a60; border-radius:14px; padding:16px; transition:border-color 0.2s,transform 0.2s; }
+    .stretch-card:hover { border-color:#64b4ff; transform:translateY(-2px); }
+    .stretch-emoji { font-size:1.8rem; margin-bottom:8px; display:block; }
+    .stretch-name  { font-family:var(--ff-h); font-size:0.82rem; font-weight:700; color:#90caff; margin-bottom:4px; }
+    .stretch-desc  { font-size:0.72rem; color:#4a7a9c; line-height:1.55; }
+    .stretch-duration { display:inline-block; margin-top:8px; font-size:0.63rem; text-transform:uppercase; letter-spacing:0.08em; color:#64b4ff; background:rgba(100,180,255,0.08); border:1px solid rgba(100,180,255,0.2); border-radius:20px; padding:2px 8px; }
+
+    .break-close-wrap { text-align:center; padding:20px 40px 32px; }
+    .break-close { padding:12px 36px; background:transparent; border:1px solid #1a3a60; color:#5a82a8; font-family:var(--ff-h); font-weight:700; font-size:0.85rem; border-radius:10px; cursor:pointer; transition:all 0.2s; }
+    .break-close:hover { border-color:#64b4ff; color:#64b4ff; }
+
+    footer {
+      text-align: center; padding: 24px; font-size: 0.7rem; color: var(--muted);
+      border-top: 1px solid var(--border); margin-top: auto;
+    }
+
+    @media (max-width: 900px) {
+      .page { grid-template-columns: 1fr; padding: 20px; }
+      #video, #canvas { width: 100%; height: auto; }
+      .video-container { width: 100%; }
+      .stretch-grid { grid-template-columns: 1fr; }
+      .break-header,.break-question,.stretches-section,.break-close-wrap { padding-left:24px; padding-right:24px; }
+      .debug-bar { padding: 8px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="logo"><div class="logo-dot"></div>PostureGuard</div>
+  <span class="badge">AI · PoseNet · COCO-18</span>
+</nav>
+
+<div class="debug-bar">
+  <span class="debug-label">⚙ Testing / Debug</span>
+  <span class="debug-sep">|</span>
+  <button class="debug-btn trigger-posture" id="debugPosture">⚠ Trigger Posture Alarm</button>
+  <button class="debug-btn trigger-break"   id="debugBreak">☕ Trigger Break Reminder</button>
+  <span class="debug-note">Remove this bar before production</span>
+</div>
+
+<div class="page">
+
+  <div class="left">
+    <span class="label">Live Detection · ตรวจจับท่าทาง (COCO 18-Keypoint Model)</span>
+
+    <div class="video-container" id="videoContainer">
+      <div class="corner tl"></div><div class="corner tr"></div>
+      <div class="corner bl"></div><div class="corner br"></div>
+
+      <div id="idleOverlay">
+        <svg width="52" height="52" viewBox="0 0 64 64" fill="none">
+          <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="1.5" stroke-dasharray="4 4"/>
+          <circle cx="32" cy="22" r="8" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M16 52c0-8.837 7.163-16 16-16s16 7.163 16 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <p>Camera inactive — press Start</p>
+      </div>
+
+      <video id="video" width="640" height="480" autoplay playsinline></video>
+      <canvas id="canvas" width="640" height="480"></canvas>
+
+      <!-- Multi-metric posture overlay (top-left) -->
+      <div id="postureDetail">
+        <div class="pd-row"><span class="pd-label">Head tilt</span><span class="pd-val" id="pdHead">—</span></div>
+        <div class="pd-row"><span class="pd-label">Shoulder level</span><span class="pd-val" id="pdShoulder">—</span></div>
+        <div class="pd-row"><span class="pd-label">Spine angle</span><span class="pd-val" id="pdSpine">—</span></div>
+        <div class="pd-row"><span class="pd-label">Hip flex</span><span class="pd-val" id="pdHip">—</span></div>
+        <div class="pd-row"><span class="pd-label">Neck forward</span><span class="pd-val" id="pdNeck">—</span></div>
+      </div>
+
+      <div id="badCountdown">
+        <span class="cd-label">Alarm in</span>
+        <span class="cd-time" id="cdTime">2:00</span>
+      </div>
+
+      <div id="camPill">
+        <div class="pill-dot" id="pillDot"></div>
+        <span id="pillText">Analyzing…</span>
+      </div>
+    </div>
+
+    <div id="postureStatus">สถานะท่าทาง: —</div>
+    <div id="angleDisplay">Keypoints detected: —</div>
+
+    <div id="alertBanner">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+      <span id="alertText">ท่าทางผิด: คุณนั่งหลังค่อม!</span>
+    </div>
+
+    <button id="startBtn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="currentColor"/>
+      </svg>
+      เริ่มการตรวจจับท่าทาง
+    </button>
+  </div>
+
+  <div class="sidebar">
+
+    <div class="card">
+      <div class="card-title">☕ Next Break</div>
+      <div class="break-ring-wrap">
+        <svg width="76" height="76" viewBox="0 0 76 76">
+          <circle class="break-arc-bg"   cx="38" cy="38" r="30"/>
+          <circle class="break-arc-fill" id="breakArcFill" cx="38" cy="38" r="30"/>
+          <text class="break-arc-num" x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" id="breakArcNum">60m</text>
+          <text class="break-arc-lbl" x="50%" y="65%" dominant-baseline="middle" text-anchor="middle">remain</text>
+        </svg>
+        <div class="break-info">
+          <div class="break-next-label">Break in</div>
+          <div class="break-next-time" id="breakNextTime">60:00</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Posture Score</div>
+      <div class="ring-wrap">
+        <svg width="86" height="86" viewBox="0 0 90 90">
+          <circle class="ring-bg"  cx="45" cy="45" r="40"/>
+          <circle class="ring-arc" id="ringArc" cx="45" cy="45" r="40"/>
+          <text class="ring-num" x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" id="ringNum">—</text>
+          <text class="ring-lbl" x="50%" y="65%" dominant-baseline="middle" text-anchor="middle">score</text>
+        </svg>
+        <div class="ring-info">
+          <div class="ring-status" id="ringStatus">Waiting…</div>
+          <div class="ring-desc"   id="ringDesc">Start detection to analyze your sitting posture.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Multi-angle joint meters -->
+    <div class="card">
+      <div class="card-title">Joint Angles · มุมข้อต่อ (COCO Model)</div>
+      <div class="meter-row">
+        <span class="meter-name">Neck forward lean</span>
+        <div class="meter-track"><div class="meter-fill" id="mNeck"></div></div>
+        <span class="meter-val" id="vNeck">—°</span>
+      </div>
+      <div class="meter-row">
+        <span class="meter-name">Shoulder–Hip–Knee</span>
+        <div class="meter-track"><div class="meter-fill" id="mSpine"></div></div>
+        <span class="meter-val" id="vSpine">—°</span>
+      </div>
+      <div class="meter-row">
+        <span class="meter-name">Hip flexion</span>
+        <div class="meter-track"><div class="meter-fill" id="mHip"></div></div>
+        <span class="meter-val" id="vHip">—°</span>
+      </div>
+      <div class="meter-row">
+        <span class="meter-name">Shoulder tilt</span>
+        <div class="meter-track"><div class="meter-fill" id="mShoulderTilt"></div></div>
+        <span class="meter-val" id="vShoulderTilt">—°</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Session Timer</div>
+      <div class="timer-big" id="timerBig">00:00</div>
+      <div class="timer-sub" id="timerSub">Not started</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Ergonomic Tips</div>
+      <div class="tip"><div class="tip-icon">💺</div><div class="tip-text"><strong>Hips at 90°</strong> — Keep thighs parallel to the floor, feet flat.</div></div>
+      <div class="tip"><div class="tip-icon">🖥️</div><div class="tip-text"><strong>Eye-level screen</strong> — Top of monitor should align with your eyes.</div></div>
+      <div class="tip"><div class="tip-icon">⏱️</div><div class="tip-text"><strong>Break every hour</strong> — Stand up, stretch, and walk around.</div></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- POSTURE ALARM -->
+<div id="postureAlarm">
+  <div class="alarm-box">
+    <span class="alarm-icon">⚠️</span>
+    <div class="alarm-title">แก้ไขท่านั่งด่วน!</div>
+    <div class="alarm-sub">คุณนั่งผิดท่ามานาน 2 นาทีแล้ว<br>กรุณานั่งตรง เพื่อสุขภาพของคุณ!</div>
+    <div class="alarm-counter" id="alarmCounter">0</div>
+    <br>
+    <button class="alarm-dismiss" id="alarmDismiss">✓ &nbsp;รับทราบ — แก้ไขแล้ว</button>
+  </div>
+</div>
+
+<!-- BREAK MODAL -->
+<div id="breakModal">
+  <div class="break-box">
+    <div class="break-header">
+      <span class="break-moon">🌿</span>
+      <div class="break-title">Time for a Break!</div>
+      <div class="break-subtitle">You've been working for an hour. Your muscles need a moment to reset — tension builds up faster than you think.</div>
+    </div>
+    <div class="break-question" id="breakQuestion">
+      <div class="break-q-text">Would you like to take a short break and stretch?</div>
+      <div class="break-btns">
+        <button class="break-yes" id="breakYes">Yes, show me stretches! 🙆</button>
+        <button class="break-no"  id="breakNo">Maybe later</button>
+      </div>
+    </div>
+    <div class="stretches-section" id="stretchesSection" style="display:none;">
+      <div class="stretches-title">Recommended Stretches · 5-Minute Routine</div>
+      <div class="stretch-grid">
+        <div class="stretch-card"><span class="stretch-emoji">🦒</span><div class="stretch-name">Neck Side Stretch</div><div class="stretch-desc">Gently tilt your head toward one shoulder, hold, then switch.</div><span class="stretch-duration">30 sec each side</span></div>
+        <div class="stretch-card"><span class="stretch-emoji">🦅</span><div class="stretch-name">Chest Opener</div><div class="stretch-desc">Clasp hands behind your back, squeeze shoulder blades and lift slightly.</div><span class="stretch-duration">20–30 seconds</span></div>
+        <div class="stretch-card"><span class="stretch-emoji">🌀</span><div class="stretch-name">Seated Spinal Twist</div><div class="stretch-desc">Sit tall, rotate torso to one side using the armrest for leverage.</div><span class="stretch-duration">30 sec each side</span></div>
+        <div class="stretch-card"><span class="stretch-emoji">🙋</span><div class="stretch-name">Overhead Reach</div><div class="stretch-desc">Interlace fingers, turn palms up and stretch both arms overhead.</div><span class="stretch-duration">20 seconds</span></div>
+        <div class="stretch-card"><span class="stretch-emoji">👁️</span><div class="stretch-name">20-20-20 Eye Relief</div><div class="stretch-desc">Look at something 20 feet away for 20 seconds. Repeat 3 times.</div><span class="stretch-duration">3 × 20 seconds</span></div>
+        <div class="stretch-card"><span class="stretch-emoji">🚶</span><div class="stretch-name">Mini Walk</div><div class="stretch-desc">Stand and walk around — even just around your desk.</div><span class="stretch-duration">2–3 minutes</span></div>
+      </div>
+    </div>
+    <div class="break-close-wrap">
+      <button class="break-close" id="breakClose">Close &amp; Resume Session</button>
+    </div>
+  </div>
+</div>
+
+<footer>© 2026 PostureGuard · AI-powered posture analysis · COCO 18-Keypoint Model · ตรวจจับท่าทางการนั่ง</footer>
+
+<script>
+  // ── DOM refs ──────────────────────────────────────────────────────────────
+  const startBtn       = document.getElementById('startBtn');
+  const video          = document.getElementById('video');
+  const canvas         = document.getElementById('canvas');
+  const ctx            = canvas.getContext('2d');
+  const postureStatus  = document.getElementById('postureStatus');
+  const angleDisplay   = document.getElementById('angleDisplay');
+  const idleOverlay    = document.getElementById('idleOverlay');
+  const camPill        = document.getElementById('camPill');
+  const pillDot        = document.getElementById('pillDot');
+  const pillText       = document.getElementById('pillText');
+  const alertBanner    = document.getElementById('alertBanner');
+  const alertText      = document.getElementById('alertText');
+  const ringArc        = document.getElementById('ringArc');
+  const ringNum        = document.getElementById('ringNum');
+  const ringStatus     = document.getElementById('ringStatus');
+  const ringDesc       = document.getElementById('ringDesc');
+  const timerBig       = document.getElementById('timerBig');
+  const timerSub       = document.getElementById('timerSub');
+  const badCountdown   = document.getElementById('badCountdown');
+  const cdTime         = document.getElementById('cdTime');
+  const breakArcFill   = document.getElementById('breakArcFill');
+  const breakArcNum    = document.getElementById('breakArcNum');
+  const breakNextTime  = document.getElementById('breakNextTime');
+  const postureAlarm   = document.getElementById('postureAlarm');
+  const alarmCounter   = document.getElementById('alarmCounter');
+  const alarmDismiss   = document.getElementById('alarmDismiss');
+  const videoContainer = document.getElementById('videoContainer');
+  const breakModal     = document.getElementById('breakModal');
+  const breakQuestion  = document.getElementById('breakQuestion');
+  const stretchesSection = document.getElementById('stretchesSection');
+  const postureDetail  = document.getElementById('postureDetail');
+
+  // Posture detail spans
+  const pdHead     = document.getElementById('pdHead');
+  const pdShoulder = document.getElementById('pdShoulder');
+  const pdSpine    = document.getElementById('pdSpine');
+  const pdHip      = document.getElementById('pdHip');
+  const pdNeck     = document.getElementById('pdNeck');
+
+  // Joint meters
+  const mNeck = document.getElementById('mNeck'), vNeck = document.getElementById('vNeck');
+  const mSpine = document.getElementById('mSpine'), vSpine = document.getElementById('vSpine');
+  const mHip = document.getElementById('mHip'), vHip = document.getElementById('vHip');
+  const mShoulderTilt = document.getElementById('mShoulderTilt'), vShoulderTilt = document.getElementById('vShoulderTilt');
+
+  let isDetecting = false;
+  let timerInterval = null;
+  let seconds = 0;
+
+  const BAD_POSTURE_THRESHOLD_MS = 2 * 60 * 1000;
+  let badPostureStart    = null;
+  let alarmFired         = false;
+  let alarmCountInterval = null;
+  let alarmSecondsShown  = 0;
+  let audioCtx           = null;
+
+  const BREAK_INTERVAL_SECS = 60 * 60;
+  let breakSecondsLeft   = BREAK_INTERVAL_SECS;
+  let breakTimerInterval = null;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // COCO-18 Keypoint indices (matching OpenPose COCO output)
+  // 0:nose, 1:neck, 2:rShoulder, 3:rElbow, 4:rWrist,
+  // 5:lShoulder, 6:lElbow, 7:lWrist, 8:rHip, 9:rKnee,
+  // 10:rAnkle, 11:lHip, 12:lKnee, 13:lAnkle,
+  // 14:rEye, 15:lEye, 16:rEar, 17:lEar
+  //
+  // PoseNet part name → COCO index mapping:
+  const PART_INDEX = {
+    nose:          0,
+    leftEye:       15,
+    rightEye:      14,
+    leftEar:       17,
+    rightEar:      16,
+    leftShoulder:  5,
+    rightShoulder: 2,
+    leftElbow:     6,
+    rightElbow:    3,
+    leftWrist:     7,
+    rightWrist:    4,
+    leftHip:       11,
+    rightHip:      8,
+    leftKnee:      12,
+    rightKnee:     9,
+    leftAnkle:     13,
+    rightAnkle:    10
+  };
+
+  // Color-coded limb connections matching OpenPose COCO visualization
+  // [partA, partB, color]
+  const LIMB_CONNECTIONS = [
+    // Head / face
+    ['nose',         'leftEye',       '#ff5555'],
+    ['nose',         'rightEye',      '#ff5555'],
+    ['leftEye',      'leftEar',       '#ff8800'],
+    ['rightEye',     'rightEar',      '#ff8800'],
+    // Neck
+    ['nose',         'leftShoulder',  '#ffdd00'],
+    ['nose',         'rightShoulder', '#ffdd00'],
+    // Shoulders
+    ['leftShoulder', 'rightShoulder', '#ff4499'],
+    // Left arm
+    ['leftShoulder', 'leftElbow',     '#00ccff'],
+    ['leftElbow',    'leftWrist',     '#00ffaa'],
+    // Right arm
+    ['rightShoulder','rightElbow',    '#cc44ff'],
+    ['rightElbow',   'rightWrist',    '#ff88cc'],
+    // Torso
+    ['leftShoulder', 'leftHip',       '#ffaa00'],
+    ['rightShoulder','rightHip',      '#ffaa00'],
+    ['leftHip',      'rightHip',      '#ff6622'],
+    // Left leg
+    ['leftHip',      'leftKnee',      '#66ff66'],
+    ['leftKnee',     'leftAnkle',     '#00ff88'],
+    // Right leg
+    ['rightHip',     'rightKnee',     '#44aaff'],
+    ['rightKnee',    'rightAnkle',    '#0055ff'],
+  ];
+
+  // Keypoint display colors per body region
+  const KEYPOINT_COLORS = {
+    nose: '#ffffff', leftEye: '#ff5555', rightEye: '#ff5555',
+    leftEar: '#ff8800', rightEar: '#ff8800',
+    leftShoulder: '#ffaa00', rightShoulder: '#ffaa00',
+    leftElbow: '#00ccff', rightElbow: '#cc44ff',
+    leftWrist: '#00ffaa', rightWrist: '#ff88cc',
+    leftHip: '#ff6622', rightHip: '#ff6622',
+    leftKnee: '#66ff66', rightKnee: '#44aaff',
+    leftAnkle: '#00ff88', rightAnkle: '#0055ff'
+  };
+
+  // ── Helper: get keypoint position by name ─────────────────────────────────
+  function getKP(keypoints, name) {
+    const kp = keypoints.find(p => p.part === name);
+    if (kp && kp.score > 0.3) return kp.position;
+    return null;
+  }
+
+  // ── Helper: calculate angle at vertex b (a–b–c) ───────────────────────────
+  function calcAngle(a, b, c) {
+    if (!a || !b || !c) return null;
+    const rad = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+    let deg = Math.abs(rad * 180 / Math.PI);
+    if (deg > 180) deg = 360 - deg;
+    return deg;
+  }
+
+  // ── Helper: angle of line from p1 to p2 relative to horizontal ───────────
+  function lineAngle(p1, p2) {
+    if (!p1 || !p2) return null;
+    return Math.abs(Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180 / Math.PI);
+  }
+
+  // ── Helper: midpoint ──────────────────────────────────────────────────────
+  function midpoint(a, b) {
+    if (!a || !b) return null;
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+
+  // ── Draw COCO skeleton ────────────────────────────────────────────────────
+  function drawCOCOSkeleton(keypoints, minConf) {
+    // Build lookup
+    const kpMap = {};
+    keypoints.forEach(kp => { kpMap[kp.part] = kp; });
+
+    // Draw limb connections
+    LIMB_CONNECTIONS.forEach(([partA, partB, color]) => {
+      const kpA = kpMap[partA], kpB = kpMap[partB];
+      if (!kpA || !kpB) return;
+      if (kpA.score < minConf || kpB.score < minConf) return;
+
+      const posA = kpA.position, posB = kpB.position;
+
+      // Draw thick colored limb line with slight glow
+      ctx.save();
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.moveTo(posA.x, posA.y);
+      ctx.lineTo(posB.x, posB.y);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+      ctx.restore();
+    });
+
+    // Draw keypoint dots
+    keypoints.forEach(kp => {
+      if (kp.score < minConf) return;
+      const color = KEYPOINT_COLORS[kp.part] || '#ffffff';
+      const pos = kp.position;
+
+      ctx.save();
+      // Outer glow ring
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 6, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.restore();
+
+      // Inner white dot
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 3, 0, 2 * Math.PI);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+
+      // Confidence-based opacity ring
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 8, 0, 2 * Math.PI);
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = kp.score * 0.5;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  // ── Draw posture reference lines ──────────────────────────────────────────
+  function drawPostureLines(keypoints) {
+    const lShoulder = getKP(keypoints, 'leftShoulder');
+    const rShoulder = getKP(keypoints, 'rightShoulder');
+    const lHip      = getKP(keypoints, 'leftHip');
+    const rHip      = getKP(keypoints, 'rightHip');
+    const nose      = getKP(keypoints, 'nose');
+    const lKnee     = getKP(keypoints, 'leftKnee');
+    const rKnee     = getKP(keypoints, 'rightKnee');
+
+    const midShoulder = midpoint(lShoulder, rShoulder);
+    const midHip      = midpoint(lHip, rHip);
+    const midKnee     = midpoint(lKnee, rKnee);
+
+    // Draw vertical spine reference line
+    if (midShoulder && midHip) {
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(midShoulder.x, midShoulder.y - 30);
+      ctx.lineTo(midHip.x, midHip.y + 30);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Draw neck-to-nose forward lean line
+    if (midShoulder && nose) {
+      ctx.save();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = 'rgba(255,200,0,0.3)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(midShoulder.x, midShoulder.y);
+      ctx.lineTo(nose.x, nose.y);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // ── Comprehensive sitting posture analysis ────────────────────────────────
+  function analyzeSittingPosture(keypoints) {
+    const nose       = getKP(keypoints, 'nose');
+    const lEar       = getKP(keypoints, 'leftEar');
+    const rEar       = getKP(keypoints, 'rightEar');
+    const lShoulder  = getKP(keypoints, 'leftShoulder');
+    const rShoulder  = getKP(keypoints, 'rightShoulder');
+    const lHip       = getKP(keypoints, 'leftHip');
+    const rHip       = getKP(keypoints, 'rightHip');
+    const lKnee      = getKP(keypoints, 'leftKnee');
+    const rKnee      = getKP(keypoints, 'rightKnee');
+
+    const midShoulder = midpoint(lShoulder, rShoulder);
+    const midHip      = midpoint(lHip, rHip);
+    const midKnee     = midpoint(lKnee, rKnee);
+    const midEar      = midpoint(lEar, rEar);
+
+    const issues = [];
+    let score = 100;
+    const metrics = {};
+
+    // ── 1. Shoulder–Hip–Knee trunk angle (primary posture metric) ──────────
+    // Good sitting: ~160–180° means upright; <150° = slumping
+    const spineAngle = calcAngle(midShoulder, midHip, midKnee);
+    metrics.spine = spineAngle;
+    if (spineAngle !== null) {
+      const spineStatus = spineAngle >= 155 ? 'good' : spineAngle >= 140 ? 'warn' : 'bad';
+      if (spineStatus === 'bad')  { issues.push('หลังค่อม (slouching spine)'); score -= 35; }
+      if (spineStatus === 'warn') { issues.push('หลังโค้งเล็กน้อย (mild hunch)'); score -= 15; }
+    }
+
+    // ── 2. Neck / head forward position ────────────────────────────────────
+    // Compare horizontal offset of ear vs shoulder — forward head posture
+    const ear       = midEar || lEar || rEar;
+    const shoulder  = midShoulder || lShoulder || rShoulder;
+    if (ear && shoulder) {
+      const forwardOffset = ear.x - shoulder.x; // positive = head forward in typical facing camera setup
+      // We use absolute because camera flip varies. Use vertical ear-shoulder alignment.
+      const earAboveShoulderDelta = shoulder.y - ear.y; // how far above shoulder the ear is
+      // If ear is barely above or below shoulder y → extreme forward head
+      const neckLean = Math.abs(ear.x - shoulder.x) / Math.max(1, earAboveShoulderDelta);
+      metrics.neckLean = neckLean;
+      if (neckLean > 0.6) { issues.push('คอยื่นไปข้างหน้า (forward head)'); score -= 20; }
+      else if (neckLean > 0.35) { score -= 10; }
+    }
+
+    // ── 3. Hip flexion angle (Shoulder–Hip–Knee) ───────────────────────────
+    // When sitting, hip angle ~80–100° is ideal
+    const hipAngleL = calcAngle(lShoulder, lHip, lKnee);
+    const hipAngleR = calcAngle(rShoulder, rHip, rKnee);
+    const hipAngle  = hipAngleL || hipAngleR;
+    metrics.hip = hipAngle;
+    if (hipAngle !== null) {
+      if (hipAngle < 70 || hipAngle > 130) { issues.push('สะโพกผิดท่า (hip misalignment)'); score -= 15; }
+    }
+
+    // ── 4. Shoulder levelness ──────────────────────────────────────────────
+    if (lShoulder && rShoulder) {
+      const shoulderTilt = Math.abs(lShoulder.y - rShoulder.y);
+      const shoulderDist = Math.abs(lShoulder.x - rShoulder.x);
+      const tiltRatio    = shoulderTilt / Math.max(1, shoulderDist);
+      metrics.shoulderTilt = tiltRatio * 90; // convert to approximate degrees
+      if (tiltRatio > 0.2) { issues.push('ไหล่เอียง (uneven shoulders)'); score -= 10; }
+    }
+
+    // ── 5. Head tilt ───────────────────────────────────────────────────────
+    const lEye = getKP(keypoints, 'leftEye'), rEye = getKP(keypoints, 'rightEye');
+    if (lEye && rEye) {
+      const eyeTilt = Math.abs(lEye.y - rEye.y) / Math.max(1, Math.abs(lEye.x - rEye.x));
+      metrics.headTilt = eyeTilt * 90;
+      if (eyeTilt > 0.25) { issues.push('ศีรษะเอียง (head tilt)'); score -= 5; }
+    }
+
+    score = Math.max(0, Math.min(100, score));
+    const isGood = issues.length === 0;
+
+    return { isGood, issues, score, metrics };
+  }
+
+  // ── Update UI with analysis results ──────────────────────────────────────
+  function updatePostureUI(result) {
+    const { isGood, issues, score, metrics } = result;
+
+    // Posture status text
+    if (isGood) {
+      postureStatus.textContent = 'ท่าทางถูกต้อง! ✓ Good posture detected';
+      postureStatus.className   = 'good';
+      mSpine.classList.remove('bad','warn');
+      pillDot.className         = 'pill-dot';
+      pillText.textContent      = 'ท่าทางถูกต้อง ✓';
+      alertBanner.classList.remove('show');
+    } else {
+      postureStatus.textContent = `ท่าทางผิด ✗ — ${issues[0]}`;
+      postureStatus.className   = 'bad';
+      pillDot.className         = 'pill-dot bad';
+      pillText.textContent      = `ท่าทางผิด — ${issues.join(', ')}`;
+      alertText.textContent     = issues.join(' · ');
+      alertBanner.classList.add('show');
+    }
+
+    // Score ring
+    ringArc.style.strokeDashoffset = 251 - (score / 100) * 251;
+    ringNum.textContent = score;
+    if (isGood) {
+      ringArc.classList.remove('bad');
+      ringStatus.className = 'ring-status good'; ringStatus.textContent = 'ท่าทางถูกต้อง ✓';
+      ringDesc.textContent = 'Keep it up! Spine alignment looks great.';
+    } else {
+      ringArc.classList.add('bad');
+      ringStatus.className = 'ring-status bad'; ringStatus.textContent = 'ท่าทางผิด ✗';
+      ringDesc.textContent = issues.slice(0, 2).join(' · ');
+    }
+
+    // Joint angle meters
+    if (metrics.spine != null) {
+      const spineGood = metrics.spine >= 155;
+      const spineWarn = metrics.spine >= 140 && metrics.spine < 155;
+      vSpine.textContent = `${metrics.spine.toFixed(1)}°`;
+      mSpine.style.width = `${Math.min(100, (metrics.spine / 180) * 100)}%`;
+      mSpine.className   = `meter-fill${spineGood ? '' : spineWarn ? ' warn' : ' bad'}`;
+    }
+    if (metrics.hip != null) {
+      vHip.textContent = `${metrics.hip.toFixed(1)}°`;
+      mHip.style.width = `${Math.min(100, (metrics.hip / 160) * 100)}%`;
+      const hipGood = metrics.hip >= 70 && metrics.hip <= 130;
+      mHip.className = `meter-fill${hipGood ? '' : ' warn'}`;
+    }
+    if (metrics.neckLean != null) {
+      const neckDeg = metrics.neckLean * 60;
+      vNeck.textContent = `${neckDeg.toFixed(1)}°`;
+      mNeck.style.width = `${Math.min(100, metrics.neckLean * 120)}%`;
+      mNeck.className   = `meter-fill${metrics.neckLean < 0.35 ? '' : metrics.neckLean < 0.6 ? ' warn' : ' bad'}`;
+    }
+    if (metrics.shoulderTilt != null) {
+      vShoulderTilt.textContent = `${metrics.shoulderTilt.toFixed(1)}°`;
+      mShoulderTilt.style.width = `${Math.min(100, metrics.shoulderTilt * 5)}%`;
+      mShoulderTilt.className   = `meter-fill${metrics.shoulderTilt < 10 ? '' : metrics.shoulderTilt < 18 ? ' warn' : ' bad'}`;
+    }
+
+    // Posture detail overlay
+    postureDetail.classList.add('show');
+    if (metrics.headTilt != null) {
+      pdHead.textContent   = `${metrics.headTilt.toFixed(1)}°`;
+      pdHead.className     = `pd-val ${metrics.headTilt < 15 ? 'good' : metrics.headTilt < 25 ? 'warn' : 'bad'}`;
+    }
+    if (metrics.shoulderTilt != null) {
+      pdShoulder.textContent = `${metrics.shoulderTilt.toFixed(1)}°`;
+      pdShoulder.className   = `pd-val ${metrics.shoulderTilt < 10 ? 'good' : metrics.shoulderTilt < 18 ? 'warn' : 'bad'}`;
+    }
+    if (metrics.spine != null) {
+      pdSpine.textContent = `${metrics.spine.toFixed(1)}°`;
+      pdSpine.className   = `pd-val ${metrics.spine >= 155 ? 'good' : metrics.spine >= 140 ? 'warn' : 'bad'}`;
+    }
+    if (metrics.hip != null) {
+      pdHip.textContent = `${metrics.hip.toFixed(1)}°`;
+      pdHip.className   = `pd-val ${metrics.hip >= 70 && metrics.hip <= 130 ? 'good' : 'warn'}`;
+    }
+    if (metrics.neckLean != null) {
+      pdNeck.textContent = `${(metrics.neckLean * 60).toFixed(1)}°`;
+      pdNeck.className   = `pd-val ${metrics.neckLean < 0.35 ? 'good' : metrics.neckLean < 0.6 ? 'warn' : 'bad'}`;
+    }
+
+    // Update bad posture timer
+    if (!isGood) {
+      if (!badPostureStart) badPostureStart = Date.now();
+      const elapsed = Date.now() - badPostureStart;
+      if (!alarmFired) {
+        if (elapsed < BAD_POSTURE_THRESHOLD_MS) {
+          badCountdown.classList.add('show');
+          updateBadCountdown(elapsed);
+        } else {
+          showAlarm();
+        }
+      }
+    } else {
+      badPostureStart = null;
+      badCountdown.classList.remove('show');
+    }
+  }
+
+  // ── Debug buttons ─────────────────────────────────────────────────────────
+  document.getElementById('debugPosture').addEventListener('click', () => {
+    alarmFired = false; showAlarm();
+  });
+  document.getElementById('debugBreak').addEventListener('click', showBreakModal);
+
+  // ── Audio ─────────────────────────────────────────────────────────────────
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+  }
+  function playAlarmSound() {
+    const ac = getAudioCtx();
+    [[440,0],[554,0.08],[440,0.16],[554,0.24],[440,0.32],[554,0.40]].forEach(([freq, when]) => {
+      const osc = ac.createOscillator(), gain = ac.createGain();
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.type = 'sawtooth'; osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, ac.currentTime + when);
+      gain.gain.linearRampToValueAtTime(0.35, ac.currentTime + when + 0.01);
+      gain.gain.linearRampToValueAtTime(0, ac.currentTime + when + 0.07);
+      osc.start(ac.currentTime + when); osc.stop(ac.currentTime + when + 0.08);
+    });
+  }
+  function playBreakChime() {
+    const ac = getAudioCtx();
+    [523, 659, 784, 1047].forEach((freq, i) => {
+      const osc = ac.createOscillator(), gain = ac.createGain();
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.type = 'sine'; osc.frequency.value = freq;
+      const when = ac.currentTime + i * 0.22;
+      gain.gain.setValueAtTime(0, when);
+      gain.gain.linearRampToValueAtTime(0.22, when + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, when + 0.65);
+      osc.start(when); osc.stop(when + 0.7);
+    });
+  }
+
+  // ── Posture alarm ─────────────────────────────────────────────────────────
+  function showAlarm() {
+    if (alarmFired) return;
+    alarmFired = true; alarmSecondsShown = 0;
+    alarmCounter.textContent = '0';
+    postureAlarm.classList.add('show');
+    videoContainer.classList.add('alarming');
+    badCountdown.classList.remove('show');
+    playAlarmSound();
+    alarmCountInterval = setInterval(() => {
+      alarmSecondsShown++; alarmCounter.textContent = alarmSecondsShown; playAlarmSound();
+    }, 1500);
+  }
+  function dismissAlarm() {
+    postureAlarm.classList.remove('show');
+    videoContainer.classList.remove('alarming');
+    clearInterval(alarmCountInterval);
+    alarmFired = false; badPostureStart = null;
+  }
+  alarmDismiss.addEventListener('click', dismissAlarm);
+
+  // ── Break modal ───────────────────────────────────────────────────────────
+  function showBreakModal() {
+    breakQuestion.style.display    = '';
+    stretchesSection.style.display = 'none';
+    breakModal.classList.add('show');
+    try { playBreakChime(); } catch(e) {}
+  }
+  function closeBreakModal() { breakModal.classList.remove('show'); startBreakTimer(); }
+  document.getElementById('breakYes').addEventListener('click', () => {
+    breakQuestion.style.display = 'none'; stretchesSection.style.display = '';
+  });
+  document.getElementById('breakNo').addEventListener('click', closeBreakModal);
+  document.getElementById('breakClose').addEventListener('click', closeBreakModal);
+
+  // ── Break ring ────────────────────────────────────────────────────────────
+  function updateBreakRing() {
+    const ratio = breakSecondsLeft / BREAK_INTERVAL_SECS;
+    breakArcFill.style.strokeDashoffset = 188 * (1 - ratio);
+    const mins = Math.floor(breakSecondsLeft / 60), secs = breakSecondsLeft % 60;
+    breakArcNum.textContent   = breakSecondsLeft > 60 ? `${mins}m` : `${breakSecondsLeft}s`;
+    breakNextTime.textContent = `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+    const isNear = breakSecondsLeft <= 300;
+    breakArcFill.classList.toggle('near', isNear);
+    breakNextTime.classList.toggle('near', isNear);
+  }
+  function startBreakTimer() {
+    clearInterval(breakTimerInterval);
+    breakSecondsLeft = BREAK_INTERVAL_SECS; updateBreakRing();
+    breakTimerInterval = setInterval(() => {
+      breakSecondsLeft = Math.max(0, breakSecondsLeft - 1); updateBreakRing();
+      if (breakSecondsLeft <= 0) { clearInterval(breakTimerInterval); showBreakModal(); }
+    }, 1000);
+  }
+  function stopBreakTimer() { clearInterval(breakTimerInterval); }
+
+  // ── Bad posture countdown ─────────────────────────────────────────────────
+  function updateBadCountdown(elapsedMs) {
+    const remainSec = Math.max(0, Math.ceil((BAD_POSTURE_THRESHOLD_MS - elapsedMs) / 1000));
+    cdTime.textContent = `${Math.floor(remainSec/60)}:${String(remainSec%60).padStart(2,'0')}`;
+  }
+
+  // ── Session timer ─────────────────────────────────────────────────────────
+  function startTimer() {
+    seconds = 0; timerSub.textContent = 'Session active';
+    timerInterval = setInterval(() => {
+      seconds++;
+      timerBig.textContent = String(Math.floor(seconds/60)).padStart(2,'0') + ':' + String(seconds%60).padStart(2,'0');
+    }, 1000);
+  }
+  function stopTimer() { clearInterval(timerInterval); timerSub.textContent = 'Session ended'; }
+
+  // ── Camera ────────────────────────────────────────────────────────────────
+  async function setupCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    video.srcObject = stream;
+  }
+
+  // ── PoseNet with full COCO skeleton ───────────────────────────────────────
+  async function detectPose() {
+    pillText.textContent = 'Loading AI model…';
+    const net = await posenet.load({
+      architecture: 'MobileNetV1',
+      outputStride: 16,
+      inputResolution: { width: 640, height: 480 },
+      multiplier: 0.75
+    });
+    pillText.textContent = 'Analyzing posture…';
+
+    video.onloadeddata = async () => {
+      setInterval(async () => {
+        if (!isDetecting) return;
+        const pose = await net.estimateSinglePose(video, { flipHorizontal: false });
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Draw posture reference lines first (below skeleton)
+        drawPostureLines(pose.keypoints);
+        // Draw full COCO color-coded skeleton
+        drawCOCOSkeleton(pose.keypoints, 0.3);
+
+        // Count detected keypoints
+        const detected = pose.keypoints.filter(k => k.score > 0.3).length;
+        angleDisplay.textContent = `Keypoints detected: ${detected}/17`;
+
+        // Analyze and display posture
+        const result = analyzeSittingPosture(pose.keypoints);
+        updatePostureUI(result);
+
+      }, 100);
+    };
+  }
+
+  // ── Start / Stop ──────────────────────────────────────────────────────────
+  startBtn.addEventListener('click', () => {
+    if (!isDetecting) {
+      isDetecting = true;
+      startBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="6" y="6" width="12" height="12" rx="2"/></svg> หยุดการตรวจจับ`;
+      startBtn.classList.add('stop');
+      idleOverlay.style.display = 'none';
+      camPill.classList.add('show');
+      postureDetail.classList.add('show');
+      startTimer(); startBreakTimer();
+      setupCamera(); detectPose();
+    } else {
+      isDetecting = false;
+      startBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg> เริ่มการตรวจจับท่าทาง`;
+      startBtn.classList.remove('stop');
+      const stream = video.srcObject;
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      idleOverlay.style.display = 'flex';
+      camPill.classList.remove('show');
+      postureDetail.classList.remove('show');
+      alertBanner.classList.remove('show');
+      badCountdown.classList.remove('show');
+      postureStatus.textContent = 'สถานะท่าทาง: —'; postureStatus.style.color = '';
+      angleDisplay.textContent  = 'Keypoints detected: —';
+      ringArc.style.strokeDashoffset = 251; ringArc.classList.remove('bad');
+      ringNum.textContent = '—'; ringStatus.className = 'ring-status'; ringStatus.textContent = 'Waiting…';
+      ringDesc.textContent = 'Start detection to analyze your sitting posture.';
+      [mNeck,mSpine,mHip,mShoulderTilt].forEach(m => { m.style.width='0%'; m.className='meter-fill'; });
+      [vNeck,vSpine,vHip,vShoulderTilt].forEach(v => v.textContent='—°');
+      badPostureStart = null; alarmFired = false;
+      stopTimer(); stopBreakTimer();
+    }
+  });
+</script>
+</body>
+</html>
